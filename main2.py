@@ -245,7 +245,7 @@ async def home():
     """
 
 @app.get("/movie/{movie_id}")
-async def get_movie(movie_id: str):
+async def get_movie(movie_id: str, request: Request):
     cache_key = f"movie:{movie_id}"
     if cache_key in stream_cache:
         cached_time, cached_data = stream_cache[cache_key]
@@ -260,14 +260,14 @@ async def get_movie(movie_id: str):
     if not data:
         raise HTTPException(status_code=404, detail="No source found")
     
-    # Rewrite stream URLs to use our proxy
-    processed_data = process_stream_data(data)
+    # Rewrite stream URLs to use our proxy dynamically based on request headers
+    processed_data = process_stream_data(data, request)
     stream_cache[cache_key] = (time.time(), processed_data)
    
     return get_first_mp4_url(processed_data)
 
 @app.get("/tv/{tv_id}/{season}/{episode}")
-async def get_tv(tv_id: str, season: int, episode: int):
+async def get_tv(tv_id: str, season: int, episode: int, request: Request):
     cache_key = f"tv:{tv_id}:{season}:{episode}"
     if cache_key in stream_cache:
         cached_time, cached_data = stream_cache[cache_key]
@@ -282,14 +282,19 @@ async def get_tv(tv_id: str, season: int, episode: int):
     if not data:
         raise HTTPException(status_code=404, detail="No source found")
     
-    processed_data = process_stream_data(data)
+    processed_data = process_stream_data(data, request)
     stream_cache[cache_key] = (time.time(), processed_data)
     
     return processed_data
 
-def process_stream_data(data: dict) -> dict:
-    """Rewrite stream URLs to use our proxy"""
+def process_stream_data(data: dict, request: Request) -> dict:
+    """Rewrite stream URLs to use our dynamic proxy"""
     import urllib.parse
+    
+    # Extract base URL dynamically from request headers (works on Render automatically)
+    forwarded_proto = request.headers.get("x-forwarded-proto", "https")
+    host = request.headers.get("host", "127.0.0.1:8000")
+    base_url = f"{forwarded_proto}://{host}"
     
     if "stream" in data and "qualities" in data["stream"]:
         for quality, stream_info in data["stream"]["qualities"].items():
@@ -301,8 +306,8 @@ def process_stream_data(data: dict) -> dict:
                 encoded_url = urllib.parse.quote(original_url, safe='')
                 encoded_referer = urllib.parse.quote(referer, safe='')
                 
-                # Replace with proxied URL
-                proxy_url = f"http://127.0.0.1:8000/proxy?url={encoded_url}&referer={encoded_referer}"
+                # Replace with proxied URL using dynamic base URL
+                proxy_url = f"{base_url}/proxy?url={encoded_url}&referer={encoded_referer}"
                 stream_info["url"] = proxy_url
                 stream_info["proxied"] = True
                 
@@ -401,22 +406,16 @@ async def proxy_segment(url: str, referer: str = "https://filmboom.top/"):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Segment proxy error: {str(e)}")
 
-
-
-#################################################################
-
 def get_first_mp4_url(data: dict) -> str | None:
     """Extracts the first mp4 URL from the stream qualities."""
     try:
         qualities = data.get("stream", {}).get("qualities", {})
         
-        # Handle qualities if it's a dictionary (keyed by quality like "1080")
         if isinstance(qualities, dict):
             for quality_info in qualities.values():
                 if isinstance(quality_info, dict) and quality_info.get("type") == "mp4":
                     return quality_info.get("url")
                     
-        # Handle qualities if it's a list
         elif isinstance(qualities, list):
             for quality_info in qualities:
                 if isinstance(quality_info, dict) and quality_info.get("type") == "mp4":
@@ -426,8 +425,6 @@ def get_first_mp4_url(data: dict) -> str | None:
         pass
         
     return None
-###############################################    
-
 
 if __name__ == "__main__":
     import uvicorn
