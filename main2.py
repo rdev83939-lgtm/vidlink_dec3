@@ -319,29 +319,28 @@ def process_stream_data(data: dict, request: Request) -> dict:
 
 @app.get("/proxy")
 async def proxy_video(url: str, referer: str = "https://filmboom.top/"):
-    """Proxy video streams with proper headers"""
+    """Proxy video streams using curl_cffi to bypass 426 Upgrade Required errors"""
     import urllib.parse
     
-    # Decode URL
     decoded_url = urllib.parse.unquote(url)
     decoded_referer = urllib.parse.unquote(referer)
     
-    # Headers to mimic browser request
     video_headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
         'Referer': decoded_referer,
         'Origin': decoded_referer.rstrip('/'),
         'Accept': '*/*',
-        'Accept-Encoding': 'identity',  # Don't compress video
+        'Accept-Encoding': 'identity',
         'Connection': 'keep-alive',
-        'Range': 'bytes=0-',  # Support seeking
+        'Range': 'bytes=0-',
     }
     
     try:
-        # Stream the video
-        req = requests.get(
+        # Use curl_cffi with browser impersonation instead of standard requests
+        req = curl_requests.get(
             decoded_url,
             headers=video_headers,
+            impersonate="chrome110",
             stream=True,
             timeout=30,
             allow_redirects=True
@@ -350,17 +349,14 @@ async def proxy_video(url: str, referer: str = "https://filmboom.top/"):
         if req.status_code not in [200, 206]:
             raise HTTPException(status_code=req.status_code, detail=f"Upstream video error: {req.status_code}")
         
-        # Forward important headers
         response_headers = {}
         for header in ['Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges', 'Cache-Control']:
             if header in req.headers:
                 response_headers[header] = req.headers[header]
         
-        # Ensure content type is correct
         if 'Content-Type' not in response_headers:
             response_headers['Content-Type'] = 'video/mp4'
-        
-        # Return streaming response
+            
         return StreamingResponse(
             req.iter_content(chunk_size=8192),
             status_code=req.status_code,
@@ -368,10 +364,8 @@ async def proxy_video(url: str, referer: str = "https://filmboom.top/"):
             media_type=response_headers.get('Content-Type', 'video/mp4')
         )
         
-    except requests.exceptions.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"Video proxy error: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Video proxy error: {str(e)}")
 
 @app.get("/proxy-segment")
 async def proxy_segment(url: str, referer: str = "https://filmboom.top/"):
