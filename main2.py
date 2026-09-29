@@ -319,7 +319,7 @@ def process_stream_data(data: dict, request: Request) -> dict:
 
 @app.get("/proxy")
 async def proxy_video(url: str, referer: str = "https://filmboom.top/"):
-    """Proxy video streams using curl_cffi to bypass 426 Upgrade Required errors"""
+    """Proxy video streams safely bypassing 426 errors by downloading/forwarding content directly"""
     import urllib.parse
     
     decoded_url = urllib.parse.unquote(url)
@@ -332,16 +332,14 @@ async def proxy_video(url: str, referer: str = "https://filmboom.top/"):
         'Accept': '*/*',
         'Accept-Encoding': 'identity',
         'Connection': 'keep-alive',
-        'Range': 'bytes=0-',
     }
     
     try:
-        # Use curl_cffi with browser impersonation instead of standard requests
+        # Fetch using curl_cffi with full browser impersonation
         req = curl_requests.get(
             decoded_url,
             headers=video_headers,
             impersonate="chrome110",
-            stream=True,
             timeout=30,
             allow_redirects=True
         )
@@ -357,8 +355,8 @@ async def proxy_video(url: str, referer: str = "https://filmboom.top/"):
         if 'Content-Type' not in response_headers:
             response_headers['Content-Type'] = 'video/mp4'
             
-        return StreamingResponse(
-            req.iter_content(chunk_size=8192),
+        return Response(
+            content=req.content,
             status_code=req.status_code,
             headers=response_headers,
             media_type=response_headers.get('Content-Type', 'video/mp4')
